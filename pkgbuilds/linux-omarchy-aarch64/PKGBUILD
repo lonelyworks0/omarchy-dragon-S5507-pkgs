@@ -9,7 +9,7 @@
 pkgbase=linux-omarchy-aarch64
 _kernel=linux-omarchy
 pkgver=7.3
-pkgrel=45
+pkgrel=46
 # NVIDIA's open kernel modules ship prebuilt as $_kernel-nvidia-open, built in
 # this recipe so every kernel lands with modules for it and nobody compiles
 # them through DKMS on a kernel update. Keep this version and the patches in
@@ -562,6 +562,7 @@ source=(
   2823-arm64-dts-qcom-Add-the-Lenovo-ThinkCentre-neo-50q-QC.patch
   2830-arm64-dts-qcom-x1p42100-asus-vivobook-s15-enable-sound.patch
   2831-HID-add-the-Vivobook-S15-S5507QA-keyboard-hotkeys.patch
+  2832-soundwire-qcom-skip-clock-stop-on-the-Vivobook-S15.patch
   x1p42100-acer-aspire-14-ai.json
   x1p42100-acer-aspire-16-ai.json
   x1p42100-microsoft-surface-pro-12in.json
@@ -1186,6 +1187,7 @@ sha256sums=('87363c24f10e06321eb362765521094e94471f6bff8bce2d6b3e40f39f004953'
             '84fc283dc3b56eb813c6aec53e6cf0c4ce9d3f9c741408c2a16700cf15d659fe'
             '5ab8bab9c534ae3a08bc2976d68dbd280ea742fca1d9ee3dc439e4a595cb0d65'
             'c4038a7ff876a0ad8156c9330f3b78952dca14782755d9f635abc79388bf74f5'
+            '177c11c0e443e10ec3da2a387ca160f413a89edf18562e3f4498a114c815cd43'
             '726d29ea34b625a5e7231e608153eed6401aaf759020a31bcabb6e205601e0e9'
             'ef79637ecae1b3738a60988f4f434c4696f7ca80e12f91302dc0d55b514dd3ca'
             '74e289f2b3c057c84fb7755c16e2b7089994ffbb48d0da7af7363022ee06ebc8'
@@ -1801,6 +1803,7 @@ b2sums=('b7fb8c74de664fdd0cd7b42afff2720bda5c4bdb2ffffa80a745c5fecd029c6fe739a3e
         'ff0bc0fe693c7cd37cc78eab94fa6fa27dd8452cff6198d107299c41b490f49a47993a193fdc0fbf65ff0a09a5dd8f3e47ca2f54965df93eecceab3694291aef'
         'ce71a7d86e8805726eff8d98964518695424eb25fb8f6323695841e648d778392824daa546e361823698fda075f9ff3c2ef7cf60f794491421079faf114be0d0'
         'faafbc65e84b58fd74619f70bad9f5dbf82ed506c1b2e288532af35bcd910f8937dac347b807d5316bb8a251231d1c96eb7c5e92dbc5f170bade5d850d62776c'
+        'a60992b62658c8fe96c67f87130a330015d31a93b2ee4ca40cb254f46e2997971bf0b6de25b387f735cfe2b8ecbad0e7cff8e85af4584e0908a06045d4941a62'
         'de18a3f607bc3df73356b8a1ef3d0daab22ae58c0b2400f1a78b73144edbb955454624a912c05474147659c2933a8739e28f1575692ce6c6622edc14f4bfd721'
         '6c718ba21c5326ead3de5de70d7bae549aa25ce0f8e226bf77d87f2f8a92829efbeec1774c0968b8f9e5dddccb58055321603f03cfaaf261d6117f6892042b09'
         '097c1af32a9d00846ffedbf6ba97b0e70917ffc692f89f751f1cbdf9a52973b98cdbf71f2ea9e0cf32bb62025fa31b0db4ce974b532faa76fe5c81252070d0dd'
