@@ -1,0 +1,321 @@
+From: linux-omarchy-aarch64
+Date: Mon, 9 Nov 2026 12:00:00 +0000
+Subject: [PATCH] arm64: dts: qcom: x1p42100-asus-vivobook-s15: enable sound
+
+The X1P42100 Vivobook S 15 tree in 7.3 has no sound node, so the
+S5507QA's speakers and headset jack never appear. Describe the WCD9385
+headset codec, the two WSA8845 speaker amplifiers and the VA macro
+microphones the way the Vivobook S14 tree does (that tree was derived
+from this board), and name the card X1E80100-ASUS-Vivobook-S15 so the
+AudioReach driver loads the topology linux-firmware ships under that
+name. alsa-ucm-conf then falls back to the ThinkPad T14s profile.
+
+The node comes from Jens Glathe's x1-asus-vivobook-s15.dtsi (tag
+jg/ubuntu-qcom-x1e-7.3.3-jg-0), itself based on Elliot Huang's posted
+"arm64: dts: qcom: support sound on Asus Vivobook S15" (linux-arm-msm,
+2 June 2025, not merged; that patch targets the X1E board and routes
+the mics from bias 3, where this one follows the S14 and uses bias 1).
+Jens Glathe's X1P series (February 2026) adds this tree and leaves
+sound out of it. The sound node is still absent from linux-next and
+from qcom for-next. Speakers and the headset were confirmed on an
+S5507QA with the X1P-42-100.
+
+Only x1p42100-asus-vivobook-s15.dts changes, so other boards keep the
+trees they had.
+
+---
+diff --git a/arch/arm64/boot/dts/qcom/x1p42100-asus-vivobook-s15.dts b/arch/arm64/boot/dts/qcom/x1p42100-asus-vivobook-s15.dts
+--- a/arch/arm64/boot/dts/qcom/x1p42100-asus-vivobook-s15.dts
++++ b/arch/arm64/boot/dts/qcom/x1p42100-asus-vivobook-s15.dts
+@@ -6,6 +6,8 @@
+ 
+ /dts-v1/;
+ 
++#include <dt-bindings/sound/qcom,q6dsp-lpass-ports.h>
++
+ #include "purwa.dtsi"
+ #include "x1-asus-vivobook-s15.dtsi"
+ 
+@@ -17,6 +19,180 @@
+ 	model = "ASUS Vivobook S 15 X1P-42-100";
+ 	compatible = "asus,vivobook-s15-x1p4", "qcom,x1p42100";
+ 	chassis-type = "laptop";
++
++	wcd938x: audio-codec {
++		compatible = "qcom,wcd9385-codec";
++
++		pinctrl-0 = <&wcd_default>;
++		pinctrl-names = "default";
++
++		qcom,micbias1-microvolt = <1800000>;
++		qcom,micbias2-microvolt = <1800000>;
++		qcom,micbias3-microvolt = <1800000>;
++		qcom,micbias4-microvolt = <1800000>;
++		qcom,mbhc-buttons-vthreshold-microvolt =
++			<75000 150000 237000 500000 500000 500000 500000 500000>;
++		qcom,mbhc-headset-vthreshold-microvolt = <1700000>;
++		qcom,mbhc-headphone-vthreshold-microvolt = <50000>;
++		qcom,rx-device = <&wcd_rx>;
++		qcom,tx-device = <&wcd_tx>;
++
++		reset-gpios = <&tlmm 191 GPIO_ACTIVE_LOW>;
++
++		vdd-buck-supply = <&vreg_l15b_1p8>;
++		vdd-rxtx-supply = <&vreg_l15b_1p8>;
++		vdd-io-supply = <&vreg_l15b_1p8>;
++		vdd-mic-bias-supply = <&vreg_bob1>;
++
++		#sound-dai-cells = <1>;
++	};
++
++	sound {
++		compatible = "qcom,x1e80100-sndcard";
++		model = "X1E80100-ASUS-Vivobook-S15";
++		audio-routing = "SpkrLeft IN", "WSA WSA_SPK1 OUT",
++				"SpkrRight IN", "WSA WSA_SPK2 OUT",
++				"IN1_HPHL", "HPHL_OUT",
++				"IN2_HPHR", "HPHR_OUT",
++				"AMIC2", "MIC BIAS2",
++				"VA DMIC0", "MIC BIAS1",
++				"VA DMIC1", "MIC BIAS1",
++				"VA DMIC0", "VA MIC BIAS1",
++				"VA DMIC1", "VA MIC BIAS1",
++				"TX SWR_INPUT1", "ADC2_OUTPUT";
++
++		displayport-0-dai-link {
++			link-name = "DisplayPort0 Playback";
++
++			codec {
++				sound-dai = <&mdss_dp0>;
++			};
++
++			cpu {
++				sound-dai = <&q6apmbedai DISPLAY_PORT_RX_0>;
++			};
++
++			platform {
++				sound-dai = <&q6apm>;
++			};
++		};
++
++		displayport-1-dai-link {
++			link-name = "DisplayPort1 Playback";
++
++			codec {
++				sound-dai = <&mdss_dp1>;
++			};
++
++			cpu {
++				sound-dai = <&q6apmbedai DISPLAY_PORT_RX_1>;
++			};
++
++			platform {
++				sound-dai = <&q6apm>;
++			};
++		};
++
++		displayport-2-dai-link {
++			link-name = "DisplayPort2 Playback";
++
++			codec {
++				sound-dai = <&mdss_dp2>;
++			};
++
++			cpu {
++				sound-dai = <&q6apmbedai DISPLAY_PORT_RX_2>;
++			};
++
++			platform {
++				sound-dai = <&q6apm>;
++			};
++		};
++
++		wcd-playback-dai-link {
++			link-name = "WCD Playback";
++
++			cpu {
++				sound-dai = <&q6apmbedai RX_CODEC_DMA_RX_0>;
++			};
++
++			codec {
++				sound-dai = <&wcd938x 0>, <&swr1 0>, <&lpass_rxmacro 0>;
++			};
++
++			platform {
++				sound-dai = <&q6apm>;
++			};
++		};
++
++		wcd-capture-dai-link {
++			link-name = "WCD Capture";
++
++			cpu {
++				sound-dai = <&q6apmbedai TX_CODEC_DMA_TX_3>;
++			};
++
++			codec {
++				sound-dai = <&wcd938x 1>, <&swr2 1>, <&lpass_txmacro 0>;
++			};
++
++			platform {
++				sound-dai = <&q6apm>;
++			};
++		};
++
++		wsa-dai-link {
++			link-name = "WSA Playback";
++
++			cpu {
++				sound-dai = <&q6apmbedai WSA_CODEC_DMA_RX_0>;
++			};
++
++			codec {
++				sound-dai = <&left_spkr>, <&right_spkr>,
++					    <&swr0 0>, <&lpass_wsamacro 0>;
++			};
++
++			platform {
++				sound-dai = <&q6apm>;
++			};
++		};
++
++		va-dai-link {
++			link-name = "VA Capture";
++
++			cpu {
++				sound-dai = <&q6apmbedai VA_CODEC_DMA_TX_0>;
++			};
++
++			codec {
++				sound-dai = <&lpass_vamacro 0>;
++			};
++
++			platform {
++				sound-dai = <&q6apm>;
++			};
++		};
++	};
++};
++
++&apps_rsc {
++	regulators-0 {
++		vreg_l1b_1p8: ldo1 {
++			regulator-name = "vreg_l1b_1p8";
++			regulator-min-microvolt = <1800000>;
++			regulator-max-microvolt = <1800000>;
++			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
++		};
++
++		vreg_l12b_1p2: ldo12 {
++			regulator-name = "vreg_l12b_1p2";
++			regulator-min-microvolt = <1200000>;
++			regulator-max-microvolt = <1200000>;
++			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
++			regulator-always-on;
++		};
++	};
+ };
+ 
+ &gpu_zap_shader {
+@@ -42,3 +218,101 @@
+ 
+ 	status = "okay";
+ };
++
++&lpass_tlmm {
++	spkr_01_sd_n_active: spkr-01-sd-n-active-state {
++		pins = "gpio12";
++		function = "gpio";
++		drive-strength = <16>;
++		bias-disable;
++		output-low;
++	};
++};
++
++&lpass_vamacro {
++	pinctrl-0 = <&dmic01_default>;
++	pinctrl-names = "default";
++
++	vdd-micb-supply = <&vreg_l1b_1p8>;
++	qcom,dmic-sample-rate = <4800000>;
++};
++
++&mdss_dp0 {
++	sound-name-prefix = "DisplayPort0";
++};
++
++&mdss_dp1 {
++	sound-name-prefix = "DisplayPort1";
++};
++
++&mdss_dp2 {
++	sound-name-prefix = "DisplayPort2";
++};
++
++&swr0 {
++	status = "okay";
++
++	pinctrl-0 = <&wsa_swr_active>, <&spkr_01_sd_n_active>;
++	pinctrl-names = "default";
++
++	/* WSA8845, Left Speaker */
++	left_spkr: speaker@0,0 {
++		compatible = "sdw20217020400";
++		reg = <0 0>;
++		reset-gpios = <&lpass_tlmm 12 GPIO_ACTIVE_LOW>;
++		#sound-dai-cells = <0>;
++		sound-name-prefix = "SpkrLeft";
++		vdd-1p8-supply = <&vreg_l15b_1p8>;
++		vdd-io-supply = <&vreg_l12b_1p2>;
++		qcom,port-mapping = <1 2 3 7 10 13>;
++	};
++
++	/* WSA8845, Right Speaker */
++	right_spkr: speaker@0,1 {
++		compatible = "sdw20217020400";
++		reg = <0 1>;
++		reset-gpios = <&lpass_tlmm 12 GPIO_ACTIVE_LOW>;
++		#sound-dai-cells = <0>;
++		sound-name-prefix = "SpkrRight";
++		vdd-1p8-supply = <&vreg_l15b_1p8>;
++		vdd-io-supply = <&vreg_l12b_1p2>;
++		qcom,port-mapping = <4 5 6 7 11 13>;
++	};
++};
++
++&swr1 {
++	status = "okay";
++
++	/* WCD9385 RX */
++	wcd_rx: codec@0,4 {
++		compatible = "sdw20217010d00";
++		reg = <0 4>;
++		qcom,rx-port-mapping = <1 2 3 4 5>;
++	};
++};
++
++&swr2 {
++	status = "okay";
++
++	/* WCD9385 TX */
++	wcd_tx: codec@0,3 {
++		compatible = "sdw20217010d00";
++		reg = <0 3>;
++		qcom,tx-port-mapping = <2 2 3 4>;
++	};
++};
++
++&tlmm {
++	wcd_default: wcd-reset-n-active-state {
++		pins = "gpio191";
++		function = "gpio";
++		drive-strength = <16>;
++		bias-disable;
++		output-low;
++	};
++};
++
++&vreg_l15b_1p8 {
++	/* WSA884x / WCD9385 supply, kept on as on the ThinkPad T14s */
++	regulator-always-on;
++};
