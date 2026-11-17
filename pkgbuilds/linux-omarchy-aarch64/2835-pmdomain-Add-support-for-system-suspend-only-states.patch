@@ -1,0 +1,66 @@
+From: Maulik Shah <maulik.shah@oss.qualcomm.com>
+Date: Fri, 13 Nov 2026 04:55:00 +0000
+Subject: [PATCH] pmdomain: Add support for system-suspend-only states
+
+Some domain idle states require system-wide coordination and should not
+be selected during regular CPU idle. They remain valid for system-wide
+suspend, including s2idle.
+
+Add a per-state system_state boolean and populate it from the
+system-state property. The runtime genpd governors skip these states.
+genpd_sync_power_off() still uses the system-suspend governor, which is
+unchanged, so s2idle can select them.
+
+[omarchy: v2 as posted. genpd_parse_state() in 7.3 ignores a missing
+idle-state-name, so the new property read sits next to that call
+instead of the error check in the posted context.]
+
+Link: https://lore.kernel.org/all/20261113-s2idle_state-v2-2-ad604182e7e7@oss.qualcomm.com/
+Signed-off-by: Maulik Shah <maulik.shah@oss.qualcomm.com>
+---
+diff --git a/drivers/pmdomain/core.c b/drivers/pmdomain/core.c
+--- a/drivers/pmdomain/core.c
++++ b/drivers/pmdomain/core.c
+@@ -3583,6 +3583,8 @@
+ 	if (!err)
+ 		genpd_state->residency_ns = 1000LL * residency;
+ 
++	genpd_state->system_state = of_property_read_bool(state_node, "system-state");
++
+ 	of_property_read_string(state_node, "idle-state-name", &genpd_state->name);
+ 
+ 	genpd_state->power_on_latency_ns = 1000LL * exit_latency;
+diff --git a/drivers/pmdomain/governor.c b/drivers/pmdomain/governor.c
+--- a/drivers/pmdomain/governor.c
++++ b/drivers/pmdomain/governor.c
+@@ -183,6 +183,9 @@
+ 	s64 min_off_time_ns;
+ 	s64 off_on_time_ns;
+ 
++	if (genpd->states[state].system_state)
++		return false;
++
+ 	off_on_time_ns = genpd->states[state].power_off_latency_ns +
+ 		genpd->states[state].power_on_latency_ns;
+ 
+@@ -405,6 +408,9 @@
+ 	 */
+ 	i = genpd->state_idx;
+ 	do {
++		if (genpd->states[i].system_state)
++			continue;
++
+ 		if ((idle_duration_ns >= (genpd->states[i].residency_ns +
+ 		    genpd->states[i].power_off_latency_ns)) &&
+ 		    (global_constraint >= (genpd->states[i].power_on_latency_ns +
+diff --git a/include/linux/pm_domain.h b/include/linux/pm_domain.h
+--- a/include/linux/pm_domain.h
++++ b/include/linux/pm_domain.h
+@@ -179,6 +179,7 @@
+ 	s64 power_off_latency_ns;
+ 	s64 power_on_latency_ns;
+ 	s64 residency_ns;
++	bool system_state;
+ 	u64 usage;
+ 	u64 rejected;
+ 	u64 above;
