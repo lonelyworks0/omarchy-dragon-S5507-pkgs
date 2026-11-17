@@ -1,0 +1,55 @@
+From: linux-omarchy-aarch64
+Date: Tue, 17 Nov 2026 10:40:00 +0000
+Subject: [PATCH] arm64: dts: qcom: hamoa: use DRIPS only during system suspend
+
+7.3 already describes domain_ss3 (PSCI 0x0200c354), the system DRIPS
+state. Entering it from runtime idle hangs the SoC after the first
+s2idle. Windows vetoes it while the screen is on and uses the shallower
+platform.SS1 state (ACPI \\_SB.SYSM._LPI, 0x02000154) instead.
+
+Add domain_ss1 for runtime idle and mark domain_ss3 with system-state,
+so the genpd governors skip DRIPS until system suspend. purwa.dtsi
+includes hamoa.dtsi, so the X1P42100 Vivobook S 15 gets the same states.
+The latencies and the SS1 state are the ones used on this laptop in
+justririll/x1e-sleep; the property name is Maulik Shah's system-state,
+not that tree's system-sleep-only.
+
+Link: https://github.com/justririll/x1e-sleep/blob/4e84b60eb0/kernel/sleep/dts-hamoa-add-ss1-idle-state.patch
+Link: https://lore.kernel.org/all/20261113-s2idle_state-v2-0-ad604182e7e7@oss.qualcomm.com/
+---
+diff --git a/arch/arm64/boot/dts/qcom/hamoa.dtsi b/arch/arm64/boot/dts/qcom/hamoa.dtsi
+--- a/arch/arm64/boot/dts/qcom/hamoa.dtsi
++++ b/arch/arm64/boot/dts/qcom/hamoa.dtsi
+@@ -305,12 +305,23 @@
+ 				min-residency-us = <7000>;
+ 			};
+ 
++			/* ACPI \\_SB.SYSM _LPI platform.SS1 */
++			domain_ss1: domain-sleep-1 {
++				compatible = "domain-idle-state";
++				arm,psci-suspend-param = <0x02000154>;
++				entry-latency-us = <250>;
++				exit-latency-us = <250>;
++				min-residency-us = <7500>;
++			};
++
+ 			domain_ss3: domain-sleep-0 {
+ 				compatible = "domain-idle-state";
+ 				arm,psci-suspend-param = <0x0200c354>;
+ 				entry-latency-us = <2500>;
+ 				exit-latency-us = <2500>;
+ 				min-residency-us = <9000>;
++				/* DRIPS from runtime idle hangs the SoC after the first s2idle */
++				system-state;
+ 			};
+ 		};
+ 	};
+@@ -470,7 +481,7 @@
+ 
+ 		system_pd: power-domain-system {
+ 			#power-domain-cells = <0>;
+-			domain-idle-states = <&domain_ss3>;
++			domain-idle-states = <&domain_ss1>, <&domain_ss3>;
+ 		};
+ 	};
+ 
