@@ -1,0 +1,494 @@
+From: linux-omarchy-aarch64
+Date: Mon, 9 Nov 2026 12:00:00 +0000
+Subject: [PATCH] HID: add the Vivobook S15 S5507QA keyboard hotkeys
+
+The ASUS Vivobook S 15 S5507QA (Snapdragon X Plus X1P-42-100) keyboard
+is I2C HID 0B05:4543. Its Fn hotkeys arrive as ASUS vendor usages on
+page 0xff31, report 0x5a, which hid-generic does not map, so only the
+standard consumer keys (volume) worked. hid-asus knows those usages but
+has no id for this keyboard, and 7.3, linux-next and the current HID
+tree still do not.
+
+0B05:4543 is not only this keyboard. The Zenbook A14 describes it as
+hdtl@17 and the Zenbook A16 as hid@17, an EC HID device next to their
+0B05:4B42 keyboards. Adding the id to hid-asus would take those devices
+off hid-generic. This driver maps the vendor keys, exposes
+asus::kbd_backlight (levels 0-3) and toggles Fn-lock on Fn+Esc, and its
+.match() accepts the id only on asus,vivobook-s15-x1p4.
+
+hid-generic decides to yield from the other driver's id table alone, so
+a driver that matches the id and then declines in .match() left the
+device with no driver. hid_bus_match() now honours .match() for every
+driver except hid-generic, and hid-generic yields only when that driver
+actually accepts the device. No in-tree driver implemented .match()
+besides hid-generic, so other machines keep the behaviour they had.
+
+The key map and the feature reports are the out-of-tree module that was
+confirmed on this laptop (vendor codes also used by hid-asus and by
+icecream95's udev-hid-bpf program for the S5507). The emoji key is
+KEY_EMOJI_PICKER. vendor_init, fnlock_toggle and backlight are module
+parameters; vendor_init defaults to on, as in that module.
+
+---
+diff --git a/drivers/hid/Kconfig b/drivers/hid/Kconfig
+index c43e824..b95c4e4 100644
+--- a/drivers/hid/Kconfig
++++ b/drivers/hid/Kconfig
+@@ -200,6 +200,21 @@ config HID_ASUS
+ 	- GL553V series
+ 	- GL753V series
+ 
++config HID_ASUS_VIVOBOOK_S15
++	tristate "Asus Vivobook S15 S5507 keyboard hotkeys"
++	depends on HID
++	depends on LEDS_CLASS
++	help
++	  Support the I2C keyboard 0B05:4543 on the ASUS Vivobook S 15
++	  S5507QA (Snapdragon X1P-42-100, asus,vivobook-s15-x1p4). It maps
++	  the vendor Fn hotkeys hid-generic ignores and exposes the keyboard
++	  backlight. The same product id is a different HID device on the
++	  Zenbook A14 and Zenbook A16, so this driver binds only on the
++	  Vivobook S 15 X1P-42-100.
++
++	  Say M here if you have that laptop. The module is called
++	  hid-asus-vivobook-s15.
++
+ config HID_AUREAL
+ 	tristate "Aureal"
+ 	help
+diff --git a/drivers/hid/Makefile b/drivers/hid/Makefile
+index 48a863b..33e1a2a 100644
+--- a/drivers/hid/Makefile
++++ b/drivers/hid/Makefile
+@@ -34,6 +34,7 @@ obj-$(CONFIG_HID_APPLETB_BL)	+= hid-appletb-bl.o
+ obj-$(CONFIG_HID_APPLETB_KBD)	+= hid-appletb-kbd.o
+ obj-$(CONFIG_HID_CREATIVE_SB0540)	+= hid-creative-sb0540.o
+ obj-$(CONFIG_HID_ASUS)		+= hid-asus.o
++obj-$(CONFIG_HID_ASUS_VIVOBOOK_S15)	+= hid-asus-vivobook-s15.o
+ obj-$(CONFIG_HID_AUREAL)	+= hid-aureal.o
+ obj-$(CONFIG_HID_BELKIN)	+= hid-belkin.o
+ obj-$(CONFIG_HID_BETOP_FF)	+= hid-betopff.o
+diff --git a/drivers/hid/hid-asus-vivobook-s15.c b/drivers/hid/hid-asus-vivobook-s15.c
+new file mode 100644
+index 0000000..e717ce6
+--- /dev/null
++++ b/drivers/hid/hid-asus-vivobook-s15.c
+@@ -0,0 +1,348 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++/*
++ * HID driver for the ASUS Vivobook S 15 S5507QA (Snapdragon X1P-42-100)
++ * I2C keyboard, 0018:0B05:4543.
++ *
++ * The keyboard sends its Fn hotkeys (screen brightness, keyboard backlight,
++ * mic mute, emoji, MyASUS, Fn-lock...) as ASUS vendor usages (page 0xff31)
++ * in input report 0x5a. hid-generic ignores those, so only the standard
++ * consumer keys (volume) work. This driver maps them to normal key codes,
++ * exposes the keyboard backlight as the LED "asus::kbd_backlight" (levels
++ * 0-3) and toggles Fn-lock on Fn+Esc.
++ *
++ * The same product id is an EC HID device on other ASUS Snapdragon laptops
++ * (Zenbook A14 hdtl@17, Zenbook A16 hid@17). .match() binds only on
++ * asus,vivobook-s15-x1p4, the board this was tested on.
++ *
++ * Vendor codes and feature commands are taken from hid-asus and from
++ * icecream95's HID-BPF program for the same keyboard (udev-hid-bpf,
++ * 0010-ASUS__Vivobook_S15_S5507_kbd.bpf.c).
++ */
++
++#include <linux/bitmap.h>
++#include <linux/hid.h>
++#include <linux/input.h>
++#include <linux/leds.h>
++#include <linux/minmax.h>
++#include <linux/module.h>
++#include <linux/of.h>
++#include <linux/pm.h>
++#include <linux/slab.h>
++#include <linux/workqueue.h>
++
++#include "hid-ids.h"
++
++#define HID_UP_ASUSVENDOR_PAGE	0xff310000
++#define VIVO_REPORT_ID		0x5a
++#define VIVO_REPORT_SIZE	64
++#define VIVO_KBD_BL_MAX		3
++
++static bool vendor_init = true;
++module_param(vendor_init, bool, 0644);
++MODULE_PARM_DESC(vendor_init, "Send the vendor init commands at probe/resume (default: Y)");
++
++static bool fnlock_toggle = true;
++module_param(fnlock_toggle, bool, 0644);
++MODULE_PARM_DESC(fnlock_toggle, "Toggle Fn-lock in the keyboard on Fn+Esc (default: Y)");
++
++static bool backlight = true;
++module_param(backlight, bool, 0444);
++MODULE_PARM_DESC(backlight, "Register the asus::kbd_backlight LED (default: Y)");
++
++struct vivo_drvdata {
++	struct hid_device *hdev;
++	struct led_classdev led;
++	bool led_registered;
++	struct work_struct fnlock_work;
++	bool fn_lock;
++	bool fn_lock_dirty;	/* we changed it, so restore it after resume */
++	bool removing;
++	DECLARE_BITMAP(unmapped_seen, 256);
++};
++
++static int vivo_send(struct hid_device *hdev, const u8 *cmd, size_t len)
++{
++	u8 *buf;
++	int ret;
++
++	buf = kzalloc(VIVO_REPORT_SIZE, GFP_KERNEL);
++	if (!buf)
++		return -ENOMEM;
++	memcpy(buf, cmd, min_t(size_t, len, VIVO_REPORT_SIZE));
++	ret = hid_hw_raw_request(hdev, VIVO_REPORT_ID, buf, VIVO_REPORT_SIZE,
++				 HID_FEATURE_REPORT, HID_REQ_SET_REPORT);
++	kfree(buf);
++	return ret < 0 ? ret : 0;
++}
++
++static void vivo_vendor_init(struct hid_device *hdev)
++{
++	static const u8 init1[] = { 0x5a, 0x05, 0x20, 0x31, 0x00, 0x08 };
++	static const u8 init2[] = { 0x5a, 0xd0, 0x8f, 0x01 };
++	int ret;
++
++	if (!vendor_init)
++		return;
++	ret = vivo_send(hdev, init1, sizeof(init1));
++	if (ret)
++		hid_warn(hdev, "vendor init 1 failed: %d\n", ret);
++	ret = vivo_send(hdev, init2, sizeof(init2));
++	if (ret)
++		hid_warn(hdev, "vendor init 2 failed: %d\n", ret);
++}
++
++static int vivo_set_fn_lock(struct hid_device *hdev, bool on)
++{
++	const u8 cmd[] = { 0x5a, 0xd0, 0x4e, on ? 0x01 : 0x00 };
++
++	return vivo_send(hdev, cmd, sizeof(cmd));
++}
++
++static void vivo_fnlock_work(struct work_struct *work)
++{
++	struct vivo_drvdata *d = container_of(work, struct vivo_drvdata, fnlock_work);
++	bool want = !d->fn_lock;
++	int ret;
++
++	if (d->removing)
++		return;
++	ret = vivo_set_fn_lock(d->hdev, want);
++	if (ret) {
++		hid_warn(d->hdev, "setting Fn-lock failed: %d\n", ret);
++		return;
++	}
++	d->fn_lock = want;
++	d->fn_lock_dirty = true;
++	hid_info(d->hdev, "Fn-lock %s\n", want ? "on" : "off");
++}
++
++static int vivo_led_set(struct led_classdev *cdev, enum led_brightness value)
++{
++	struct vivo_drvdata *d = container_of(cdev, struct vivo_drvdata, led);
++	u8 cmd[] = { 0x5a, 0xba, 0xc5, 0xc4, 0 };
++
++	if (d->removing)
++		return 0;
++	cmd[4] = min_t(unsigned int, value, VIVO_KBD_BL_MAX);
++	return vivo_send(d->hdev, cmd, sizeof(cmd));
++}
++
++#define vivo_map(c) hid_map_usage_clear(hi, usage, bit, max, EV_KEY, (c))
++
++static int vivo_input_mapping(struct hid_device *hdev, struct hid_input *hi,
++			      struct hid_field *field, struct hid_usage *usage,
++			      unsigned long **bit, int *max)
++{
++	if ((usage->hid & HID_USAGE_PAGE) != HID_UP_ASUSVENDOR_PAGE)
++		return 0;	/* default handling for everything else */
++
++	switch (usage->hid & HID_USAGE) {
++	case 0x10: /* F5, screen brightness down */
++		vivo_map(KEY_BRIGHTNESSDOWN);
++		break;
++	case 0x20: /* F6, screen brightness up */
++		vivo_map(KEY_BRIGHTNESSUP);
++		break;
++	case 0xc7: /* F4, keyboard backlight */
++		vivo_map(KEY_KBDILLUMTOGGLE);
++		break;
++	case 0xc4:
++		vivo_map(KEY_KBDILLUMUP);
++		break;
++	case 0xc5:
++		vivo_map(KEY_KBDILLUMDOWN);
++		break;
++	case 0x7c: /* mic mute */
++		vivo_map(KEY_MICMUTE);
++		break;
++	case 0x7e: /* emoji */
++		vivo_map(KEY_EMOJI_PICKER);
++		break;
++	case 0xcb: /* mic mode */
++		vivo_map(KEY_PROG3);
++		break;
++	case 0x86: /* MyASUS */
++		vivo_map(KEY_PROG1);
++		break;
++	case 0x9d: /* Fn+F fan profile */
++		vivo_map(KEY_PROG4);
++		break;
++	case 0x99:
++		vivo_map(KEY_PROG4);
++		break;
++	case 0xae:
++		vivo_map(KEY_PROG4);
++		break;
++	case 0x4e: /* Fn+Esc */
++		vivo_map(KEY_FN_ESC);
++		break;
++	case 0x35:
++		vivo_map(KEY_DISPLAY_OFF);
++		break;
++	case 0x6c:
++		vivo_map(KEY_SLEEP);
++		break;
++	case 0x6b: /* touchpad toggle */
++		vivo_map(KEY_F21);
++		break;
++	case 0x82:
++		vivo_map(KEY_CAMERA);
++		break;
++	case 0x85:
++		vivo_map(KEY_CAMERA);
++		break;
++	case 0x88:
++		vivo_map(KEY_RFKILL);
++		break;
++	case 0xb5:
++		vivo_map(KEY_CALC);
++		break;
++	case 0x92:
++		vivo_map(KEY_CALC);
++		break;
++	case 0xba:
++		vivo_map(KEY_PROG2);
++		break;
++	case 0x5c:
++		vivo_map(KEY_PROG3);
++		break;
++	default:
++		/* ASUS declares all 256 usages; leave the rest unmapped */
++		return -1;
++	}
++
++	set_bit(EV_REP, hi->input->evbit);
++	return 1;
++}
++
++static int vivo_event(struct hid_device *hdev, struct hid_field *field,
++		      struct hid_usage *usage, __s32 value)
++{
++	struct vivo_drvdata *d = hid_get_drvdata(hdev);
++	unsigned int code = usage->hid & HID_USAGE;
++
++	if ((usage->hid & HID_USAGE_PAGE) != HID_UP_ASUSVENDOR_PAGE)
++		return 0;
++
++	if (!usage->type && code != 0x00 && code != 0xff && code < 256 &&
++	    !test_and_set_bit(code, d->unmapped_seen))
++		hid_info(hdev, "unmapped ASUS vendor key code 0x%02x\n", code);
++
++	if (usage->type == EV_KEY && usage->code == KEY_FN_ESC && value &&
++	    fnlock_toggle && !d->removing)
++		schedule_work(&d->fnlock_work);
++
++	return 0;
++}
++
++static bool vivo_has_feature_5a(struct hid_device *hdev)
++{
++	return hdev->report_enum[HID_FEATURE_REPORT].report_id_hash[VIVO_REPORT_ID] != NULL;
++}
++
++static int vivo_probe(struct hid_device *hdev, const struct hid_device_id *id)
++{
++	struct vivo_drvdata *d;
++	int ret;
++
++	d = devm_kzalloc(&hdev->dev, sizeof(*d), GFP_KERNEL);
++	if (!d)
++		return -ENOMEM;
++	d->hdev = hdev;
++	INIT_WORK(&d->fnlock_work, vivo_fnlock_work);
++	hid_set_drvdata(hdev, d);
++
++	/* Same input layout as hid-generic had */
++	hdev->quirks |= HID_QUIRK_INPUT_PER_APP;
++
++	ret = hid_parse(hdev);
++	if (ret) {
++		hid_err(hdev, "parse failed: %d\n", ret);
++		return ret;
++	}
++
++	ret = hid_hw_start(hdev, HID_CONNECT_DEFAULT);
++	if (ret) {
++		hid_err(hdev, "hw start failed: %d\n", ret);
++		return ret;
++	}
++
++	if (!vivo_has_feature_5a(hdev)) {
++		hid_warn(hdev, "no feature report 0x5a; hotkeys only, no backlight/Fn-lock\n");
++		return 0;
++	}
++
++	vivo_vendor_init(hdev);
++
++	if (backlight) {
++		d->led.name = "asus::kbd_backlight";
++		d->led.max_brightness = VIVO_KBD_BL_MAX;
++		d->led.brightness = 1;	/* actual level is not readable */
++		d->led.brightness_set_blocking = vivo_led_set;
++		d->led.flags = LED_CORE_SUSPENDRESUME | LED_RETAIN_AT_SHUTDOWN;
++		ret = led_classdev_register(&hdev->dev, &d->led);
++		if (ret)
++			hid_warn(hdev, "backlight LED registration failed: %d\n", ret);
++		else
++			d->led_registered = true;
++	}
++
++	hid_info(hdev, "Vivobook S15 keyboard hotkeys enabled\n");
++	return 0;
++}
++
++static void vivo_remove(struct hid_device *hdev)
++{
++	struct vivo_drvdata *d = hid_get_drvdata(hdev);
++
++	if (d->led_registered)
++		led_classdev_unregister(&d->led);
++	d->removing = true;
++	cancel_work_sync(&d->fnlock_work);
++	hid_hw_stop(hdev);
++}
++
++static int vivo_resume(struct hid_device *hdev)
++{
++	struct vivo_drvdata *d = hid_get_drvdata(hdev);
++
++	if (!vivo_has_feature_5a(hdev))
++		return 0;
++	vivo_vendor_init(hdev);
++	if (d->fn_lock_dirty)
++		vivo_set_fn_lock(hdev, d->fn_lock);
++	return 0;
++}
++
++static bool vivo_match(struct hid_device *hdev __always_unused,
++		       bool ignore_special_driver)
++{
++	if (ignore_special_driver)
++		return false;
++
++	/* Same product id is a different device on other ASUS boards. */
++	return of_machine_is_compatible("asus,vivobook-s15-x1p4");
++}
++
++static const struct hid_device_id vivo_devices[] = {
++	{ HID_I2C_DEVICE(USB_VENDOR_ID_ASUSTEK,
++			 USB_DEVICE_ID_ASUSTEK_VIVOBOOK_S15_KEYBOARD) },
++	{ }
++};
++MODULE_DEVICE_TABLE(hid, vivo_devices);
++
++static struct hid_driver vivo_driver = {
++	.name		= "asus-vivobook-s15",
++	.id_table	= vivo_devices,
++	.match		= vivo_match,
++	.probe		= vivo_probe,
++	.remove		= vivo_remove,
++	.input_mapping	= vivo_input_mapping,
++	.event		= vivo_event,
++	.resume		= pm_ptr(vivo_resume),
++	.reset_resume	= pm_ptr(vivo_resume),
++};
++module_hid_driver(vivo_driver);
++
++MODULE_DESCRIPTION("ASUS Vivobook S15 S5507 (Snapdragon) keyboard hotkeys and backlight");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/hid/hid-core.c b/drivers/hid/hid-core.c
+index a3ff051..d17989a 100644
+--- a/drivers/hid/hid-core.c
++++ b/drivers/hid/hid-core.c
+@@ -17,6 +17,7 @@
+ #include <linux/slab.h>
+ #include <linux/init.h>
+ #include <linux/kernel.h>
++#include <linux/string.h>
+ #include <linux/list.h>
+ #include <linux/mm.h>
+ #include <linux/spinlock.h>
+@@ -2735,7 +2736,19 @@ static int hid_bus_match(struct device *dev, const struct device_driver *drv)
+ 	struct hid_driver *hdrv = to_hid_driver(drv);
+ 	struct hid_device *hdev = to_hid_device(dev);
+ 
+-	return hid_match_device(hdev, hdrv) != NULL;
++	if (!hid_match_device(hdev, hdrv))
++		return 0;
++
++	/*
++	 * hid-generic's .match() inspects every other driver and stays a
++	 * probe-time decision. Any other driver that implements .match() can
++	 * decline here, so a later driver (hid-generic) still gets the device
++	 * instead of the declined probe failing and leaving it unbound.
++	 */
++	if (hdrv->match && strcmp(hdrv->name, "hid-generic"))
++		return hdrv->match(hdev, hid_ignore_special_drivers);
++
++	return 1;
+ }
+ 
+ /**
+diff --git a/drivers/hid/hid-generic.c b/drivers/hid/hid-generic.c
+index c2de916..1fcfbc4 100644
+--- a/drivers/hid/hid-generic.c
++++ b/drivers/hid/hid-generic.c
+@@ -31,7 +31,18 @@ static int __check_hid_generic(struct device_driver *drv, void *data)
+ 	if (hdrv == &hid_generic)
+ 		return 0;
+ 
+-	return hid_match_device(hdev, hdrv) != NULL;
++	if (!hid_match_device(hdev, hdrv))
++		return 0;
++
++	/*
++	 * A driver can match the id and still decline in .match(), for
++	 * example when the same product id is a different device on another
++	 * machine. Yield only when that driver will actually bind.
++	 */
++	if (hdrv->match && !hdrv->match(hdev, false))
++		return 0;
++
++	return 1;
+ }
+ 
+ static bool hid_generic_match(struct hid_device *hdev,
+diff --git a/drivers/hid/hid-ids.h b/drivers/hid/hid-ids.h
+index cb7f16d..5a6fbdb 100644
+--- a/drivers/hid/hid-ids.h
++++ b/drivers/hid/hid-ids.h
+@@ -221,6 +221,8 @@
+ #define USB_DEVICE_ID_ASUSTEK_T304_KEYBOARD	0x184a
+ #define USB_DEVICE_ID_ASUSTEK_I2C_KEYBOARD	0x8585
+ #define USB_DEVICE_ID_ASUSTEK_I2C_ZENBOOK_KEYBOARD	0x4b42
++/* Vivobook S 15 S5507 keyboard. Also an EC HID node on other ASUS boards. */
++#define USB_DEVICE_ID_ASUSTEK_VIVOBOOK_S15_KEYBOARD	0x4543
+ #define USB_DEVICE_ID_ASUSTEK_I2C_TOUCHPAD	0x0101
+ #define USB_DEVICE_ID_ASUSTEK_ROG_KEYBOARD1 0x1854
+ #define USB_DEVICE_ID_ASUSTEK_ROG_KEYBOARD2 0x1837

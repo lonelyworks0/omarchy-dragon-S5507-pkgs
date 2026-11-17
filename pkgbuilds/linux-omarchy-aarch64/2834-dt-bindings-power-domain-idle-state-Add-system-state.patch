@@ -1,0 +1,46 @@
+From: Maulik Shah <maulik.shah@oss.qualcomm.com>
+Date: Fri, 13 Nov 2026 04:55:00 +0000
+Subject: [PATCH] dt-bindings: power: domain-idle-state: Add system-state
+
+Some domain idle states require system-wide coordination and are not
+applicable while the platform is up and running.
+
+Add a boolean system-state property to describe these states.
+
+[omarchy: v2 as posted, for the X1 domain_ss3 state. The Monaco board
+change in the same series is not included.]
+
+Link: https://lore.kernel.org/all/20261113-s2idle_state-v2-1-ad604182e7e7@oss.qualcomm.com/
+Signed-off-by: Maulik Shah <maulik.shah@oss.qualcomm.com>
+---
+diff --git a/Documentation/devicetree/bindings/power/domain-idle-state.yaml b/Documentation/devicetree/bindings/power/domain-idle-state.yaml
+index 4dd4f59bbbec..b19952f6225d 100644
+--- a/Documentation/devicetree/bindings/power/domain-idle-state.yaml
++++ b/Documentation/devicetree/bindings/power/domain-idle-state.yaml
+@@ -45,6 +45,12 @@ patternProperties:
+           state will yield power benefits, after overcoming the overhead while
+           entering the idle state.
+ 
++      system-state:
++        description:
++          When present, this state requires system-wide coordination and is
++          not applicable while the platform is up and running.
++        type: boolean
++
+       arm,psci-suspend-param:
+         $ref: /schemas/types.yaml#/definitions/uint32
+         description: |
+@@ -77,5 +83,13 @@ examples:
+         exit-latency-us = <40>;
+         min-residency-us = <80>;
+       };
++
++      domain_power_off: domain-power-off {
++        compatible = "domain-idle-state";
++        entry-latency-us = <706562>;
++        exit-latency-us = <706562>;
++        min-residency-us = <1414124>;
++        system-state;
++      };
+     };
+ ...

@@ -1,0 +1,36 @@
+From: linux-omarchy-aarch64
+Date: Tue, 17 Nov 2026 10:40:00 +0000
+Subject: [PATCH] mfd: syscon: do not attach a clock provider's parent clock
+
+syscon treats the first clocks entry as the register-access clock and
+keeps it prepared. On the X1E TCSR clock provider that entry is the
+parent clock, bi_tcxo. Holding it prepared pins an RPMh XO vote, so the
+crystal stays on through s2idle.
+
+Skip clocks on a node that has #clock-cells. Other syscon users are
+unchanged.
+
+Source: https://github.com/justririll/x1e-sleep/blob/4e84b60eb0/kernel/sleep/syscon-skip-clock-of-clock-providers.patch
+
+---
+diff --git a/drivers/mfd/syscon.c b/drivers/mfd/syscon.c
+--- a/drivers/mfd/syscon.c
++++ b/drivers/mfd/syscon.c
+@@ -123,7 +123,16 @@
+ 	}
+ 
+ 	if (check_res) {
+-		clk = of_clk_get(np, 0);
++		/*
++		 * The "clocks" of a clock provider (the X1E TCSR block) are its
++		 * parent clocks, not a register clock. Attaching one keeps it
++		 * prepared forever and pins an RPMh XO vote, so the crystal stays
++		 * on through suspend.
++		 */
++		if (of_property_present(np, "#clock-cells"))
++			clk = ERR_PTR(-ENOENT);
++		else
++			clk = of_clk_get(np, 0);
+ 		if (IS_ERR(clk)) {
+ 			ret = PTR_ERR(clk);
+ 			/* clock is optional */
