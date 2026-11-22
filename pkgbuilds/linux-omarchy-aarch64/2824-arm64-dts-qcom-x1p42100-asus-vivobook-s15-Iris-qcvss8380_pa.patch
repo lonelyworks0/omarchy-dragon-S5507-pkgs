@@ -1,0 +1,35 @@
+From: linux-omarchy-aarch64
+Date: Sun, 22 Nov 2026 00:00:00 +0000
+Subject: [PATCH] arm64: dts: qcom: x1p42100-asus-vivobook-s15: load the X Plus
+ Iris firmware
+
+7.3's x1p42100-asus-vivobook-s15.dts asks Iris for qcvss8380.mbn. ASUS
+package 44984 (S5507QAD V1.367.7800.0) ships that name as the X Elite
+image: MBN v7, QC_IMAGE_VERSION_STRING vfw-3.1 rel0088, variant PROD,
+and a single soc_hw id 0xA009. Secure PAS rejects it on the X1P-42-100
+(SoC hardware id 0xA016) with -EINVAL, so qcom-iris never comes up.
+
+The same package's qcvss8380_pa.mbn is the one-pipe image the other X
+Plus boards load (Dell Inspiron 14 5441, Samsung Galaxy Book4 Edge 15,
+IdeaPad 5 2-in-1, IdeaPad Slim 3x). It is the same vfw-3.1 rel0088
+build, variant PROD_IRIS3_1P, signed only for 0xA016. On an S5507QA,
+installing those bytes and decoding H.264 with mpv --hwdec=v4l2m2m-copy
+ran through iris_driver with no kernel errors (linux-omarchy 7.3.0-47,
+21 November 2026).
+
+Point this tree at qcvss8380_pa.mbn. The X Elite Vivobook S 15 keeps
+qcvss8380.mbn.
+
+---
+diff --git a/arch/arm64/boot/dts/qcom/x1p42100-asus-vivobook-s15.dts b/arch/arm64/boot/dts/qcom/x1p42100-asus-vivobook-s15.dts
+--- a/arch/arm64/boot/dts/qcom/x1p42100-asus-vivobook-s15.dts
++++ b/arch/arm64/boot/dts/qcom/x1p42100-asus-vivobook-s15.dts
+@@ -24,7 +24,7 @@
+ };
+ 
+ &iris {
+-	firmware-name = "qcom/x1p42100/ASUSTeK/vivobook-s15/qcvss8380.mbn";
++	firmware-name = "qcom/x1p42100/ASUSTeK/vivobook-s15/qcvss8380_pa.mbn";
+ 
+ 	status = "okay";
+ };

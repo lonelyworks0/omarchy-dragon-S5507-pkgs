@@ -450,6 +450,10 @@ The ThinkCentre's first USB controller has no Type-C port, so the connector, the
 
 The package installs `x126100-lenovo-thinkcentre-neo-50q-qc.json` with nine hardware IDs, the ones systemd-stub compares that hold across BIOS updates.
 
+### ASUS Vivobook S 15 (X1P-42-100) video firmware
+
+`2824` points the Iris node in 7.3's `x1p42100-asus-vivobook-s15.dts` at `qcvss8380_pa.mbn`. The tree asked for `qcvss8380.mbn`, and ASUS package 44984's file of that name is the X Elite image: MBN v7, vfw-3.1 rel0088, variant `PROD`, signed only for SoC hardware id 0xA009. Secure PAS rejects it on the X1P-42-100 (0xA016) with -EINVAL. `qcvss8380_pa.mbn` from the same package is the same rel0088 build as variant `PROD_IRIS3_1P`, signed for 0xA016, which is the file the Dell Inspiron 14 5441, the Galaxy Book4 Edge 15, the IdeaPad 5 2-in-1 and the IdeaPad Slim 3x load. `asus-vivobook-s15-firmware` installs it under `qcom/x1p42100/ASUSTeK/vivobook-s15/`. On an S5507QA, those bytes decoded H.264 through `iris_driver` with `mpv --hwdec=v4l2m2m-copy` and no kernel errors (linux-omarchy 7.3.0-47, 21 November 2026).
+
 ### Surface Pro 11 with the LCD
 
 The Surface Pro 11 has one SMBIOS identity for its LCD and OLED models, and systemd's list gives it to `microsoft,denali-oled`, so an LCD model got the OLED tree. `x1p64100-microsoft-denali.json` carries the three hardware IDs that include the panel, LG's `LGD077b` from an owner's hardware report, under `microsoft,denali-lcd`. systemd-stub compares those before the others.
