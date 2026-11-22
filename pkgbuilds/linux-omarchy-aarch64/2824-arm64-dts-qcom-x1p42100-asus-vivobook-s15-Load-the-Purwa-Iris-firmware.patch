@@ -1,0 +1,40 @@
+From 531c82322f76f3f6d1c537d7351f96567264eb47 Mon Sep 17 00:00:00 2001
+From: Omarchy Authors <omarchy@omarchy.org>
+Date: Sun, 22 Nov 2026 03:49:26 +0000
+Subject: [PATCH] arm64: dts: qcom: x1p42100-asus-vivobook-s15: Load the Purwa
+ Iris firmware
+
+The X1P-42-100 iris node requests qcvss8380.mbn. ASUS signs that image
+only for the X Elite (SoC hw id 0xa009). On the X1P42100 (0xa016)
+TrustZone rejects it from qcom_pas_init_image with -EINVAL, and the
+video decoder never probes.
+
+The production image in the same Windows package is qcvss8380_pa.mbn
+(vfw-3.1:rel0088, IMAGE_VARIANT_STRING=PROD_IRIS3_1P), signed for
+0xa016. The other X1P42100 boards already load that name: the Dell
+Inspiron 14 Plus 5441, the Galaxy Book4 Edge 15, the IdeaPad Slim 3x
+and the IdeaPad 5x 2-in-1.
+
+Point this node at qcvss8380_pa.mbn. Installing that file where the
+previous tree looked made iris bind /dev/video0 and mpv decode H.264
+with v4l2m2m-copy.
+---
+ arch/arm64/boot/dts/qcom/x1p42100-asus-vivobook-s15.dts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/qcom/x1p42100-asus-vivobook-s15.dts b/arch/arm64/boot/dts/qcom/x1p42100-asus-vivobook-s15.dts
+index c754104..845b7ef 100644
+--- a/arch/arm64/boot/dts/qcom/x1p42100-asus-vivobook-s15.dts
++++ b/arch/arm64/boot/dts/qcom/x1p42100-asus-vivobook-s15.dts
+@@ -24,7 +24,7 @@
+ };
+ 
+ &iris {
+-	firmware-name = "qcom/x1p42100/ASUSTeK/vivobook-s15/qcvss8380.mbn";
++	firmware-name = "qcom/x1p42100/ASUSTeK/vivobook-s15/qcvss8380_pa.mbn";
+ 
+ 	status = "okay";
+ };
+-- 
+2.43.0
+
