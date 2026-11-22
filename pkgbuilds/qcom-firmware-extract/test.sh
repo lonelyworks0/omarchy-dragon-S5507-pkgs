@@ -824,3 +824,166 @@ printf '%s 0 test\n%s 0 test\n' "$cdsp" "$cdsp_dtb" >"$cdsp_stage/manifest"
   grep -Fq "$rs/fw/$p/zap.mbn.xz" "$rs/root/etc/mkinitcpio.conf.d/qcom-firmware.conf"
   echo "ok - --retire keeps a node's copies unless all of them can go, and repairs the zap shader entry without a manifest"
 )
+
+# Differing MBN/ELF candidates are chosen by the SoC ids in the hash segment.
+# Fixtures are tiny ELFs; the parser is the one the package installs.
+(
+  soc="$scratch/soc"
+  helper="$package_dir/mbn-soc.py"
+  store="$soc/store"
+  dt="$soc/dt"
+  fw="$soc/firmware"
+  path=qcom/x1p42100/ASUSTeK/vivobook-s15
+  mkdir -p "$store/elite" "$store/purwa" "$dt/remoteproc@0" "$dt/gpu@0/zap-shader" \
+    "$dt/iris" "$fw" "$soc/root/sys/devices/soc0"
+  cat >"$soc/mkmbn.py" <<'PY'
+import struct, sys
+
+def build(path, socs, version, elf_class, nonce):
+    socs = [int(s, 0) for s in socs]
+    ids = (socs + [0] * 12)[:12]
+    if version == 6:
+        meta = struct.pack("<8I", 1, 0, 0, 0, 0, 0, 0, 0)
+        meta += struct.pack("<12I", *ids)
+        meta += b"\x00" * (120 - len(meta))
+        segment = struct.pack("<12I", 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, len(meta)) + meta
+    elif version == 7:
+        meta = struct.pack("<4I", 1, 0, 0, 0)
+        meta += struct.pack("<12I", *ids)
+        meta += b"\x00" * (224 - len(meta))
+        segment = struct.pack("<10I", 0, 7, 0, 0, len(meta), 0, 0, 0, 0, 0) + meta
+    else:
+        raise SystemExit(f"bad version {version}")
+    if elf_class == 1:
+        phoff, ehsize, phentsize = 52, 52, 32
+        ehdr = b"\x7fELF" + bytes([1, 1, 1]) + b"\x00" * 9
+        ehdr += struct.pack("<HHIIIIIHHHHHH", 2, 183, 1, nonce, phoff, 0, 0, ehsize, phentsize, 1, 0, 0, 0)
+        phdr = struct.pack("<IIIIIIII", 1, phoff + phentsize, 0, 0, len(segment), len(segment), 0x02000000, 4)
+    elif elf_class == 2:
+        phoff, ehsize, phentsize = 64, 64, 56
+        ehdr = b"\x7fELF" + bytes([2, 1, 1]) + b"\x00" * 9
+        ehdr += struct.pack("<HHIQQQIHHHHHH", 2, 183, 1, nonce, phoff, 0, 0, ehsize, phentsize, 1, 0, 0, 0)
+        phdr = struct.pack("<IIQQQQQQ", 1, 0x02000000, phoff + phentsize, 0, 0, len(segment), len(segment), 8)
+    else:
+        raise SystemExit(f"bad class {elf_class}")
+    if len(ehdr) + len(phdr) != phoff + phentsize:
+        raise SystemExit(f"header {len(ehdr)}+{len(phdr)} != {phoff + phentsize}")
+    with open(path, "wb") as out:
+        out.write(ehdr + phdr + segment)
+
+_, path, version, elf_class, nonce, *socs = sys.argv
+build(path, socs, int(version), int(elf_class), int(nonce, 0))
+PY
+  mbn() { python3 "$soc/mkmbn.py" "$@"; }
+
+  mbn "$store/purwa/qcvss8380_pa.mbn" 6 1 1 0xa016
+  mbn "$store/elite/qcvss8380.mbn" 6 1 2 0xa009
+  mbn "$soc/v7.mbn" 7 1 3 0xa016 0xa009
+  mbn "$soc/elf64.mbn" 6 2 4 0xa016
+  printf 'not-elf' >"$soc/text.mbn"
+
+  [[ $(python3 "$helper" "$store/purwa/qcvss8380_pa.mbn") == "qcvss8380_pa.mbn: 0xa016" ]]
+  [[ $(python3 "$helper" "$store/elite/qcvss8380.mbn") == "qcvss8380.mbn: 0xa009" ]]
+  [[ $(python3 "$helper" "$soc/v7.mbn") == "v7.mbn: 0xa016 0xa009" ]]
+  [[ $(python3 "$helper" "$soc/elf64.mbn") == "elf64.mbn: 0xa016" ]]
+  [[ $(python3 "$helper" --ids "$soc/v7.mbn") == "0xa016 0xa009" ]]
+  if python3 "$helper" "$soc/text.mbn" >/dev/null 2>"$soc/parser.err"; then
+    echo "not ok - a non-ELF was reported as signed" >&2
+    exit 1
+  fi
+  grep -Fq "not an ELF image" "$soc/parser.err"
+  echo "ok - hash-segment parser reads v6, v7 and ELF64 SoC ids"
+
+  run_soc() {
+    QCOM_FW_DT_ROOT="$dt" \
+      QCOM_FW_FIRMWARE_ROOT="$fw" \
+      QCOM_FW_ROOT="$soc/root" \
+      QCOM_FW_TEST_EUID=0 \
+      QCOM_FW_MBN_SOC="${QCOM_FW_MBN_SOC:-$helper}" \
+      PATH="$test_bin:$PATH" \
+      bash "$extractor" "$@"
+  }
+
+  printf '%s\0' "$path/qcvss8380.mbn" >"$dt/iris/firmware-name"
+  printf 'asus,vivobook-s15\0qcom,x1p42100\0qcom,x1e80100\0' >"$dt/compatible"
+  # No soc_id file: the qcom,x1p42100 compatible is the signing id.
+  rm -f "$soc/root/sys/devices/soc0/soc_id"
+  run_soc --stage "$soc/stage-compat" -d "$store" 2>"$soc/note"
+  cmp -s "$soc/stage-compat/$path/qcvss8380.mbn" "$store/purwa/qcvss8380_pa.mbn"
+  grep -Fq "selected qcvss8380.mbn from $store/purwa/qcvss8380_pa.mbn: signed for 0xa016, running chip 0xa016" "$soc/note"
+  echo "ok - qcom,x1p42100 selects the image signed for 0xa016, including a _pa name"
+
+  # The signature wins over the _pa name when they disagree.
+  mbn "$store/purwa/qcvss8380_pa.mbn" 6 1 5 0xa009
+  mbn "$store/elite/qcvss8380.mbn" 6 1 6 0xa016
+  run_soc --stage "$soc/stage-sig" -d "$store" 2>"$soc/note"
+  cmp -s "$soc/stage-sig/$path/qcvss8380.mbn" "$store/elite/qcvss8380.mbn"
+  grep -Fq "signed for 0xa016, running chip 0xa016" "$soc/note"
+  echo "ok - a conclusive signature beats the _pa filename"
+
+  # Same filename, two signatures. soc_id 0xa016 (decimal in sysfs) picks Purwa.
+  mbn "$store/elite/qccdsp8380.mbn" 6 1 7 0xa009
+  mbn "$store/purwa/qccdsp8380.mbn" 6 1 8 0xa016
+  printf '%s\0' "$path/qccdsp8380.mbn" >"$dt/remoteproc@0/firmware-name"
+  printf '40982\n' >"$soc/root/sys/devices/soc0/soc_id"
+  run_soc --stage "$soc/stage-same" -d "$store" 2>"$soc/note"
+  cmp -s "$soc/stage-same/$path/qccdsp8380.mbn" "$store/purwa/qccdsp8380.mbn"
+  echo "ok - /sys/devices/soc0/soc_id 40982 selects the copy signed 0xa016"
+
+  # socinfo 555 is the X Elite even if a device tree also says x1p42100.
+  printf '555\n' >"$soc/root/sys/devices/soc0/soc_id"
+  run_soc --stage "$soc/stage-555" -d "$store" 2>"$soc/note"
+  cmp -s "$soc/stage-555/$path/qccdsp8380.mbn" "$store/elite/qccdsp8380.mbn"
+  grep -Fq "running chip 0x22b, 0xa009" "$soc/note"
+  echo "ok - socinfo id 555 maps to signing id 0xa009 and ignores a Purwa compatible"
+
+  # Both copies signed for the other chip: refuse, and do not fall back to _pa.
+  mbn "$store/elite/qcvss8380.mbn" 6 1 9 0xa009
+  mbn "$store/purwa/qcvss8380_pa.mbn" 6 1 10 0xa009
+  printf '%s\0' "$path/qcvss8380.mbn" >"$dt/iris/firmware-name"
+  printf '0xa016\n' >"$soc/root/sys/devices/soc0/soc_id"
+  run_soc --stage "$soc/stage-none" -d "$store" 2>"$soc/none.err" || true
+  [[ ! -e $soc/stage-none/$path/qcvss8380.mbn ]]
+  grep -Fq "refusing ambiguous qcvss8380.mbn: running chip 0xa016 matches none of these candidates" "$soc/none.err"
+  grep -Fq "candidate $store/elite/qcvss8380.mbn (signed for 0xa009)" "$soc/none.err"
+  grep -Fq "candidate $store/purwa/qcvss8380_pa.mbn (signed for 0xa009)" "$soc/none.err"
+  echo "ok - nothing signed for the chip is refused by name, without using _pa"
+
+  # Two different images both signed for this chip.
+  mbn "$store/elite/qcvss8380.mbn" 6 1 11 0xa016
+  mbn "$store/purwa/qcvss8380_pa.mbn" 6 1 12 0xa016
+  run_soc --stage "$soc/stage-many" -d "$store" 2>"$soc/many.err" || true
+  [[ ! -e $soc/stage-many/$path/qcvss8380.mbn ]]
+  grep -Fq "matches more than one of these candidates" "$soc/many.err"
+  echo "ok - two images signed for the chip are still refused"
+
+  # Unreadable signatures: the _pa name is the fallback, and only then.
+  printf 'elite-bytes' >"$store/elite/qcdxkmsuc8380.mbn"
+  printf 'purwa-bytes' >"$store/purwa/qcdxkmsuc8380_pa.mbn"
+  printf '%s\0' "$path/qcdxkmsuc8380.mbn" >"$dt/gpu@0/zap-shader/firmware-name"
+  printf '0xa016\n' >"$soc/root/sys/devices/soc0/soc_id"
+  run_soc --stage "$soc/stage-pa" -d "$store" 2>"$soc/note"
+  [[ $(<"$soc/stage-pa/$path/qcdxkmsuc8380.mbn") == purwa-bytes ]]
+  grep -Fq "signature SoC ids were not conclusive" "$soc/note"
+  # Drop the Purwa compatible so the soc_id file is the only chip id.
+  rm -f "$dt/compatible"
+  printf '0xa009\n' >"$soc/root/sys/devices/soc0/soc_id"
+  run_soc --stage "$soc/stage-nopa" -d "$store" 2>"$soc/note"
+  [[ $(<"$soc/stage-nopa/$path/qcdxkmsuc8380.mbn") == elite-bytes ]]
+  echo "ok - an unreadable signature falls back to the _pa name for a known chip"
+
+  # No chip id: do not pick the _pa name on a hunch.
+  rm -f "$soc/root/sys/devices/soc0/soc_id" "$dt/compatible"
+  run_soc --stage "$soc/stage-unknown" -d "$store" 2>"$soc/unknown.err" || true
+  [[ ! -e $soc/stage-unknown/$path/qcdxkmsuc8380.mbn ]]
+  grep -Fq "refusing ambiguous qcdxkmsuc8380.mbn: running chip unknown" "$soc/unknown.err"
+  grep -Fq "candidate $store/purwa/qcdxkmsuc8380_pa.mbn (no SoC id)" "$soc/unknown.err"
+  echo "ok - an unknown chip is refused instead of guessed"
+
+  # Parser unavailable is the same as an unreadable signature.
+  printf '0xa016\n' >"$soc/root/sys/devices/soc0/soc_id"
+  QCOM_FW_MBN_SOC="$soc/missing-parser.py" run_soc --stage "$soc/stage-noparser" -d "$store" 2>"$soc/note"
+  [[ $(<"$soc/stage-noparser/$path/qcdxkmsuc8380.mbn") == purwa-bytes ]]
+  grep -Fq "_pa variant name" "$soc/note"
+  echo "ok - without the parser, a known Purwa chip still takes the _pa name"
+)

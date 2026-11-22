@@ -32,6 +32,16 @@
 #                     tree holding the files) instead of the Windows
 #                     partitions. --install then ignores the stage.
 #
+# When a driver store holds several copies of one firmware, identical bytes
+# are used as they are. Differing copies are chosen by the SoC ids in each
+# MBN/ELF hash segment, compared with this machine's chip id
+# (/sys/devices/soc0/soc_id, or the device-tree compatible when that file is
+# not the id the signature carries). A "_pa" filename is used only when those
+# signatures do not decide and the chip is known. If nothing matches, the
+# file is skipped and the candidates and chip ids are named. An installed
+# companion image, then the newest Windows driver package, still break the
+# ties the signatures do not.
+#
 # Files land in /usr/lib/firmware/updates to avoid package ownership conflicts.
 #
 # A board package lists named firmware that must not come from Windows on its
@@ -93,6 +103,8 @@ done
 
 log() { printf 'qcom-firmware-extract: %s\n' "$*"; }
 warn() { printf 'qcom-firmware-extract: %s\n' "$*" >&2; }
+# find_in_sources prints the chosen path on stdout, so notes go to stderr.
+note() { printf 'qcom-firmware-extract: %s\n' "$*" >&2; }
 
 # ---------------------------------------------------------------------------
 # 1. What does this machine ask for, and what is already there?
@@ -395,20 +407,296 @@ windows_firmware_names() {
   fi
 }
 
-# Require a companion match when several firmware variants exist. Returns 1
-# when the sources have no candidate and 2 when it refuses ambiguous ones.
+# Purwa images are often named beside the Hamoa one: qcvss8380_pa.mbn next to
+# qcvss8380.mbn. A name that already ends in _pa is left as it is.
+pa_variant_name() {
+  local name=$1 stem ext
+  if [[ $name == *_pa || $name == *_pa.* ]]; then
+    printf '%s\n' "$name"
+    return 0
+  fi
+  if [[ $name == *.* ]]; then
+    ext=${name##*.}
+    stem=${name%.*}
+    printf '%s_pa.%s\n' "$stem" "$ext"
+  else
+    printf '%s_pa\n' "$name"
+  fi
+}
+
+is_pa_variant_name() {
+  local base
+  base=$(basename -- "$1")
+  [[ $base == *_pa || $base == *_pa.* ]]
+}
+
+# Signing ids TrustZone compares with the fused chip. Linux socinfo's soc_id
+# is a different number (555 for X1E80100, 615 for the X1P-64-100 Hamoa bin);
+# those two map to the Hamoa signing id. The X1P42100's socinfo id is not in
+# the kernel table, so the device-tree compatible is the equivalent.
+HAMOA_SIGNING_ID=40969   # 0xa009
+PURWA_SIGNING_ID=40982   # 0xa016
+
+MBN_HELPER=""
+mbn_helper_resolved=no
+resolve_mbn_helper() {
+  [[ $mbn_helper_resolved == yes ]] && return 0
+  mbn_helper_resolved=yes
+  local dir
+  if [[ -n ${QCOM_FW_MBN_SOC:-} ]]; then
+    if [[ -f ${QCOM_FW_MBN_SOC} ]]; then
+      MBN_HELPER=$QCOM_FW_MBN_SOC
+    fi
+    return 0
+  fi
+  dir=$(dirname -- "$0")
+  if [[ -f $dir/mbn-soc.py ]]; then
+    MBN_HELPER=$dir/mbn-soc.py
+    return 0
+  fi
+  if [[ -f /usr/lib/qcom-firmware-extract/mbn-soc.py ]]; then
+    MBN_HELPER=/usr/lib/qcom-firmware-extract/mbn-soc.py
+  fi
+}
+
+# Space-separated 0x ids, or failure when the image has none.
+image_soc_ids() {
+  local out
+  resolve_mbn_helper
+  [[ -n $MBN_HELPER ]] || return 1
+  command -v python3 >/dev/null 2>&1 || return 1
+  out=$(python3 "$MBN_HELPER" --ids "$1" 2>/dev/null) || return 1
+  [[ -n $out ]] || return 1
+  printf '%s\n' "$out"
+}
+
+signed_ids_text() {
+  local ids
+  if ids=$(image_soc_ids "$1"); then
+    printf 'signed for %s\n' "${ids// /, }"
+  else
+    printf 'no SoC id\n'
+  fi
+}
+
+# Decimal chip id from QCOM_FW_SOC_ID, or from soc_id. Accepts 40982 and 0xa016.
+# A test root does not fall through to the host's soc_id.
+read_soc_id_number() {
+  local raw="" file
+  local -a files=()
+  if [[ -n ${QCOM_FW_SOC_ID:-} ]]; then
+    raw=$QCOM_FW_SOC_ID
+  else
+    [[ -n ${QCOM_FW_SOC_ID_FILE:-} ]] && files+=("$QCOM_FW_SOC_ID_FILE")
+    if [[ -n $ROOT ]]; then
+      files+=("$ROOT/sys/devices/soc0/soc_id")
+    else
+      files+=("/sys/devices/soc0/soc_id")
+    fi
+    for file in "${files[@]}"; do
+      [[ -r $file ]] || continue
+      raw=$(tr -d '[:space:]' <"$file")
+      [[ -n $raw ]] && break
+    done
+  fi
+  [[ -n $raw ]] || return 1
+  if [[ $raw =~ ^[0-9]+$ ]]; then
+    printf '%u\n' "$((10#$raw))"
+  elif [[ $raw =~ ^0[xX][0-9a-fA-F]+$ ]]; then
+    printf '%u\n' "$((raw))"
+  else
+    return 1
+  fi
+}
+
+signing_id_for_socinfo() {
+  case $1 in
+    555 | 615) printf '%s\n' "$HAMOA_SIGNING_ID" ;;
+    *) return 1 ;;
+  esac
+}
+
+# The first known qcom compatible wins, so qcom,x1p42100 is not shadowed by
+# the qcom,x1e80100 fallback listed after it.
+signing_id_from_devicetree() {
+  local compatible
+  [[ -r $DT_ROOT/compatible ]] || return 1
+  while IFS= read -r compatible; do
+    case $compatible in
+      qcom,x1p42100) printf '%s\n' "$PURWA_SIGNING_ID"; return 0 ;;
+      qcom,x1p64100 | qcom,x1e80100) printf '%s\n' "$HAMOA_SIGNING_ID"; return 0 ;;
+    esac
+  done < <(tr '\0' '\n' <"$DT_ROOT/compatible")
+  return 1
+}
+
+# Decimal ids this machine should match, one per line. A known socinfo id is
+# the silicon and is not mixed with a different device-tree id. The raw
+# soc_id is included too, so a file signed for that number still matches.
+running_chip_ids() {
+  local raw mapped compatible_id
+  local -a ids=()
+  declare -A seen=()
+  if raw=$(read_soc_id_number); then
+    ids+=("$raw")
+    seen[$raw]=1
+    if mapped=$(signing_id_for_socinfo "$raw"); then
+      if [[ -z ${seen[$mapped]-} ]]; then
+        ids+=("$mapped")
+      fi
+      printf '%s\n' "${ids[@]}"
+      return 0
+    fi
+  fi
+  if compatible_id=$(signing_id_from_devicetree); then
+    if [[ -z ${seen[$compatible_id]-} ]]; then
+      ids+=("$compatible_id")
+    fi
+  fi
+  ((${#ids[@]})) || return 1
+  printf '%s\n' "${ids[@]}"
+}
+
+chip_desc() {
+  local id text=""
+  local -a chips=()
+  mapfile -t chips < <(running_chip_ids || true)
+  ((${#chips[@]})) || { printf '%s\n' unknown; return 0; }
+  for id in "${chips[@]}"; do
+    [[ -n $text ]] && text+=', '
+    text+=$(printf '0x%x' "$id")
+  done
+  printf '%s\n' "$text"
+}
+
+# Sets chosen and soc_reason (match, inconclusive, none, many). A result is
+# conclusive only when every candidate yields SoC ids and the running chip is
+# known. chosen is the caller's variable, via bash's dynamic scope.
+select_signed_candidate() {
+  local cand ids chip id matched parsed_all=1
+  local -a running=() matching=()
+  chosen=""
+  soc_reason=inconclusive
+  mapfile -t running < <(running_chip_ids || true)
+  ((${#running[@]})) || return 1
+  for cand in "$@"; do
+    ids=$(image_soc_ids "$cand") || { parsed_all=0; break; }
+  done
+  ((parsed_all)) || return 1
+  for cand in "$@"; do
+    ids=$(image_soc_ids "$cand")
+    matched=0
+    for id in $ids; do
+      for chip in "${running[@]}"; do
+        if [[ $((id)) -eq $chip ]]; then
+          matched=1
+        fi
+      done
+    done
+    if ((matched)); then
+      matching+=("$cand")
+    fi
+  done
+  if ((${#matching[@]} == 0)); then
+    soc_reason=none
+    return 1
+  fi
+  if chosen=$(unique_candidate "${matching[@]}"); then
+    soc_reason=match
+    return 0
+  fi
+  soc_reason=many
+  chosen=""
+  return 1
+}
+
+# Name fallback used only when signature parsing is not conclusive. Purwa
+# (0xa016) takes the _pa names; any other known chip takes the rest. It has
+# to exclude something, and the files it keeps have to agree.
+select_by_pa_name() {
+  local cand chip purwa=0
+  local -a running=() chosen_set=()
+  chosen=""
+  mapfile -t running < <(running_chip_ids || true)
+  ((${#running[@]})) || return 1
+  for chip in "${running[@]}"; do
+    [[ $chip -eq $PURWA_SIGNING_ID ]] && purwa=1
+  done
+  for cand in "$@"; do
+    if ((purwa)); then
+      is_pa_variant_name "$cand" && chosen_set+=("$cand")
+    else
+      is_pa_variant_name "$cand" || chosen_set+=("$cand")
+    fi
+  done
+  ((${#chosen_set[@]})) || return 1
+  ((${#chosen_set[@]} == $#)) && return 1
+  chosen=$(unique_candidate "${chosen_set[@]}") || return 1
+}
+
+warn_ambiguous() {
+  local base=$1 why=$2
+  shift 2
+  local cand
+  case $why in
+    none)
+      warn "refusing ambiguous $base: running chip $(chip_desc) matches none of these candidates"
+      ;;
+    many)
+      warn "refusing ambiguous $base: running chip $(chip_desc) matches more than one of these candidates"
+      ;;
+    *)
+      warn "refusing ambiguous $base: running chip $(chip_desc); signature SoC ids did not select one of these candidates"
+      ;;
+  esac
+  for cand in "$@"; do
+    warn "  candidate $cand ($(signed_ids_text "$cand"))"
+  done
+}
+
+# Require one variant when several firmware files match. Returns 1 when the
+# sources have no candidate and 2 when it refuses ambiguous ones. chosen and
+# soc_reason belong to this function; the selectors assign them.
 find_in_sources() {
-  local base=$1 node=$2 candidate name
+  local base=$1 node=$2 candidate name pa
+  local chosen="" soc_reason=""
   local -a candidates=()
   while IFS= read -r name; do
     while IFS= read -r -d '' candidate; do
       candidates+=("$candidate")
     done < <(find "${sources[@]}" -type f -iname "$name" -print0 2>/dev/null)
-    ((${#candidates[@]})) && break
+    if ((${#candidates[@]})); then
+      pa=$(pa_variant_name "$name")
+      if [[ $pa != "$name" ]]; then
+        while IFS= read -r -d '' candidate; do
+          candidates+=("$candidate")
+        done < <(find "${sources[@]}" -type f -iname "$pa" -print0 2>/dev/null)
+      fi
+      break
+    fi
   done < <(windows_firmware_names "$base")
 
   ((${#candidates[@]})) || return 1
   if unique_candidate "${candidates[@]}"; then
+    return 0
+  fi
+
+  if select_signed_candidate "${candidates[@]}"; then
+    note "selected $base from $chosen: $(signed_ids_text "$chosen"), running chip $(chip_desc)"
+    printf '%s\n' "$chosen"
+    return 0
+  fi
+
+  # none and many are answers. The _pa name is only a fallback when the
+  # signatures themselves could not be compared.
+  if [[ $soc_reason == none || $soc_reason == many ]]; then
+    warn_ambiguous "$base" "$soc_reason" "${candidates[@]}"
+    return 2
+  fi
+
+  if select_by_pa_name "${candidates[@]}"; then
+    note "selected $base from $chosen: _pa variant name, running chip $(chip_desc); signature SoC ids were not conclusive"
+    printf '%s\n' "$chosen"
     return 0
   fi
 
@@ -420,7 +708,7 @@ find_in_sources() {
     return 0
   fi
 
-  warn "refusing ambiguous $base: no unique variant matches its installed companion firmware"
+  warn_ambiguous "$base" "$soc_reason" "${candidates[@]}"
   return 2
 }
 
