@@ -1,0 +1,44 @@
+From: linux-omarchy-aarch64
+Date: Tue, 10 Nov 2026 14:30:00 +0000
+Subject: [PATCH] soundwire: qcom: skip clock stop on the Vivobook S15
+ S5507QA
+
+On the ASUS Vivobook S 15 S5507QA (X1P-42-100, asus,vivobook-s15-x1p4)
+the WSA SoundWire controller, 6b10000.soundwire, holds the two WSA884x
+amplifiers. After it exits clock stop on runtime resume those amplifiers
+report every register as 0x21, and wsa884x keeps the PA off. The DAPM
+path is fully on and the PCM is RUNNING, but nothing comes out of the
+speakers. This is the same failure patch 2438 works around on Glymur's
+v3.1.0 controllers, which this X1P controller is not.
+
+Keeping every qcom-soundwire controller out of runtime suspend
+(power/control=on) makes the speakers play, confirmed on this machine.
+Mark clock stop unsupported when the machine compatible is
+asus,vivobook-s15-x1p4, the board compatible in
+x1p42100-asus-vivobook-s15.dts, so runtime suspend skips the clock stop
+and runtime resume resets the controller and re-enumerates, as v3.1.0
+already does. Other machines keep the 2438 behaviour.
+
+---
+diff --git a/drivers/soundwire/qcom.c b/drivers/soundwire/qcom.c
+--- a/drivers/soundwire/qcom.c
++++ b/drivers/soundwire/qcom.c
+@@ -667,10 +667,15 @@
+ 		/*
+ 		 * Peripherals on v3.1.0 controllers (Glymur) often come back
+ 		 * from a clock stop unattached, or attached but returning
+-		 * garbage for every register read. Reset the controller and
+-		 * re-enumerate on runtime resume instead, as at probe.
++		 * garbage for every register read. The Vivobook S 15 S5507QA
++		 * (asus,vivobook-s15-x1p4) does the same on its WSA bus: the
++		 * WSA884x amplifiers answer every register with 0x21 and the
++		 * PA stays off. Reset and re-enumerate instead of exiting
++		 * clock stop.
+ 		 */
+-		ctrl->clock_stop_not_supported = ctrl->version >= SWRM_VERSION_3_1_0;
++		ctrl->clock_stop_not_supported =
++			ctrl->version >= SWRM_VERSION_3_1_0 ||
++			of_machine_is_compatible("asus,vivobook-s15-x1p4");
+ 		/* Now compare with entries */
+ 		list_for_each_entry_safe(slave, _s, &bus->slaves, node) {
+ 			if (sdw_compare_devid(slave, id) == 0) {

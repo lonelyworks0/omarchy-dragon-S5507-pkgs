@@ -9,7 +9,7 @@
 pkgbase=linux-omarchy-aarch64
 _kernel=linux-omarchy
 pkgver=7.3
-pkgrel=44
+pkgrel=48
 # NVIDIA's open kernel modules ship prebuilt as $_kernel-nvidia-open, built in
 # this recipe so every kernel lands with modules for it and nobody compiles
 # them through DKMS on a kernel update. Keep this version and the patches in
@@ -561,6 +561,14 @@ source=(
   2822-dt-bindings-arm-qcom-Add-the-Lenovo-ThinkCentre-neo-.patch
   2823-arm64-dts-qcom-Add-the-Lenovo-ThinkCentre-neo-50q-QC.patch
   2824-arm64-dts-qcom-x1p42100-asus-vivobook-s15-Load-the-Purwa-Iris-firmware.patch
+  2830-arm64-dts-qcom-x1p42100-asus-vivobook-s15-enable-sound.patch
+  2831-HID-add-the-Vivobook-S15-S5507QA-keyboard-hotkeys.patch
+  2832-soundwire-qcom-skip-clock-stop-on-the-Vivobook-S15.patch
+  2833-arm64-dts-qcom-x1-asus-vivobook-s15-let-the-panel-3v3-switch-off.patch
+  2834-dt-bindings-power-domain-idle-state-Add-system-state.patch
+  2835-pmdomain-Add-support-for-system-suspend-only-states.patch
+  2836-arm64-dts-qcom-hamoa-use-DRIPS-only-during-system-suspend.patch
+  2837-mfd-syscon-do-not-attach-a-clock-providers-parent-clock.patch
   x1p42100-acer-aspire-14-ai.json
   x1p42100-acer-aspire-16-ai.json
   x1p42100-microsoft-surface-pro-12in.json
@@ -1184,6 +1192,14 @@ sha256sums=('87363c24f10e06321eb362765521094e94471f6bff8bce2d6b3e40f39f004953'
             '12d9c5a1250c2bb8c90bfedf31ebcdd5ec3a0c71a5bd125536ae3201aba3a6e9'
             '84fc283dc3b56eb813c6aec53e6cf0c4ce9d3f9c741408c2a16700cf15d659fe'
             '278cf051dd741053097a803039d319d1e59705e2648c7f543937995f300cf448'
+            '5ab8bab9c534ae3a08bc2976d68dbd280ea742fca1d9ee3dc439e4a595cb0d65'
+            'c4038a7ff876a0ad8156c9330f3b78952dca14782755d9f635abc79388bf74f5'
+            '177c11c0e443e10ec3da2a387ca160f413a89edf18562e3f4498a114c815cd43'
+            'e724cb319207d1d538edc621d004b02c214bebdd1c0f7ea9407867edcbf41610'
+            '6ada0949cf4d56f45a6b4a6b26b956f531f50cd9c88d885445dd47f0d72ecf90'
+            '58c845338afb5ef9fad516edf8bdd34c9597f5678cf67acf9374bea81d27add8'
+            '48b0f3d17fbd2df18a1ffe2587557921727cb693a10df992ee340c6411f94c8e'
+            '6fce7588c00580bfd77deebbaf8732fe18fb37dfea32d2ef9f4c36211a65c80e'
             '726d29ea34b625a5e7231e608153eed6401aaf759020a31bcabb6e205601e0e9'
             'ef79637ecae1b3738a60988f4f434c4696f7ca80e12f91302dc0d55b514dd3ca'
             '74e289f2b3c057c84fb7755c16e2b7089994ffbb48d0da7af7363022ee06ebc8'
@@ -1222,7 +1238,7 @@ sha256sums=('87363c24f10e06321eb362765521094e94471f6bff8bce2d6b3e40f39f004953'
             'ae5730ccf495854bad7f3f7459be1eb7bdb6b38b74fcbb133451cf151fbac14b'
             '54c6946021f3e49ca4dc9744898b6f7691ab7191592f76e4abe14cb1a4c0c03e'
             '1832f3d5393980ff380cd0660601a8d16c0a7870b79caa1cdadbef7cd0aaf592')
-sha256sums_aarch64=('0e9a79eab46abe9aa655302599e5dab9688b1f89e51dab0a3c600b14d2aae0a4')
+sha256sums_aarch64=('6c5f7c3fd649175c6ba50cba7bbe89d58ba1e47f39381f93114d94d1a6b81758')
 b2sums=('b7fb8c74de664fdd0cd7b42afff2720bda5c4bdb2ffffa80a745c5fecd029c6fe739a3ecbdaa5c5e27194a8acb9bf861271e7bafe6eb475bb3ccd6862e4caf60'
         'SKIP'
         '60eac409f1ba50fe319f6b3aa5b0af81bc7ce5628ca41c1af346a6d5ef0fc9c577527742d1f70ece7e07ea410fcd112b32d64f0a05af5b532f27b62e5e7d837a'
@@ -1798,6 +1814,14 @@ b2sums=('b7fb8c74de664fdd0cd7b42afff2720bda5c4bdb2ffffa80a745c5fecd029c6fe739a3e
         '950ea137bb251ae8d1237cf1680d1d0c9c2c9b0a6feeeb5ab0b3ed87778442a368e81121bec7ff2a94b56cf1d713d21887a71c804ef06ad601580eea3a2e17e4'
         'ff0bc0fe693c7cd37cc78eab94fa6fa27dd8452cff6198d107299c41b490f49a47993a193fdc0fbf65ff0a09a5dd8f3e47ca2f54965df93eecceab3694291aef'
         '8a3971cade05d8e8858a0058195db57cadaaae3cca216e118394c4093a0602c6579f84ca6bd4fb73e6149c812f9e6aa9004f8c30e092a1773d98fdf18ee1390f'
+        'ce71a7d86e8805726eff8d98964518695424eb25fb8f6323695841e648d778392824daa546e361823698fda075f9ff3c2ef7cf60f794491421079faf114be0d0'
+        'faafbc65e84b58fd74619f70bad9f5dbf82ed506c1b2e288532af35bcd910f8937dac347b807d5316bb8a251231d1c96eb7c5e92dbc5f170bade5d850d62776c'
+        'a60992b62658c8fe96c67f87130a330015d31a93b2ee4ca40cb254f46e2997971bf0b6de25b387f735cfe2b8ecbad0e7cff8e85af4584e0908a06045d4941a62'
+        '3894c60ccbd565b3b0709e7a8108c7f7a0ba4532e0e2ac7b539c727f80f3ba6b21c34e4ea0483e6403df5ef9820f6bde6a00ad0b4df526043d2d516637ec1225'
+        'f5e88d968590fe8f707eb6440cfb23d1d1bee01d237076fecd5ca3a60e410f16616908a7b5ee530120bb47c3856ad75fbfc5a6bba72a0d34b0a5694b7fd80ae3'
+        'e73fcff55611d0783e3b9b4ddd29b850c1050439b5b54a845060b7562f3fd296dea13c6f0f06b2e351098421bdc27ae1ab9e1f3e6ba5d56deb12eaeb6725f9b4'
+        'd13e526e60896956d5e996df7ba0f223822f4ca1e5d306332de5e86b6db7c95662dc02de38f081ed6faef3c188fdcff848ae84dfec4856f78c885118f9a2cd2a'
+        '63a60108c69e4afa19ed31f6245144c96386248402ca5cf81ea1c6c84a9c101b05757c767e510c32ce3e7c7ed950babb527e364e056619e122771ff4848393b5'
         'de18a3f607bc3df73356b8a1ef3d0daab22ae58c0b2400f1a78b73144edbb955454624a912c05474147659c2933a8739e28f1575692ce6c6622edc14f4bfd721'
         '6c718ba21c5326ead3de5de70d7bae549aa25ce0f8e226bf77d87f2f8a92829efbeec1774c0968b8f9e5dddccb58055321603f03cfaaf261d6117f6892042b09'
         '097c1af32a9d00846ffedbf6ba97b0e70917ffc692f89f751f1cbdf9a52973b98cdbf71f2ea9e0cf32bb62025fa31b0db4ce974b532faa76fe5c81252070d0dd'
@@ -1836,7 +1860,7 @@ b2sums=('b7fb8c74de664fdd0cd7b42afff2720bda5c4bdb2ffffa80a745c5fecd029c6fe739a3e
         '4426d029431f76e9eb4f607616c7107f1f8fb9c4ec1dbd8f74ded6945cedd99d8af79f0037846c99b3aad15889439e0e0040e0d44724ad78811bee7dd4ffe465'
         'b2841f9381a41c9a708377cd00a3bc0fe8ab3cf1ef89bf53cbff9aff82875a3bd0afd6e69b87cb3fa7c832fac0a60b8ec0b993ff4f98218c7f95434abcb37af5'
         '6b7fe2022f125e1c59f9645730cac87a3258e9f2210c19ff1f82022ea644ec1242ba9444e59e64f2e4e30f0c579f4ae2e05e119b30cb4d2564e270690373c906')
-b2sums_aarch64=('df5301b4582e4cc59c094c88da015258599c190ff088bac586f2692fb2d0219409de0465189e70c6e23515ab87e5fd26da7433cedf57b6494bfa726faeb557a2')
+b2sums_aarch64=('b45f17c0df17ce58530d8dc714244b3dc8f407d4a4969b3a7ff372a0f1b5f7c4810f78f9ce19ef707eb1944aa2c98d6fb52d5d6d5a5a9b913e43052207aba1fd')
 
 # https://www.kernel.org/pub/linux/kernel/v7.x/sha256sums.asc
 
