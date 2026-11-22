@@ -17,13 +17,26 @@ The device tree names every firmware file the kernel will ask for
 mount read-only: with `--stage`, any such partition, and with `--install`,
 only those on internal disks. A DSP device-tree image the device tree calls
 `*_dtb.mbn` is also found under its Windows name, `*_dtbs.elf`, when the exact
-name is missing. If Windows carries several variants and linux-firmware has a
-companion image from the same device-tree node, the sibling image's hash
-selects the compatible variant. When no file of the node is installed yet,
-as on a first install after Windows updated a driver and kept the older
-package, every file of the node comes from the one driver package whose INF
-`DriverVer` Windows ranks first (date, then version). Identical duplicates are
-accepted; other differing variants are skipped. The result is
+name is missing. A `*_pa.*` file kept beside that name (the Purwa image, as
+in `qcvss8380.mbn` and `qcvss8380_pa.mbn`) is part of the same search.
+
+Identical copies are used as they are. When the copies differ, each MBN or
+ELF hash segment is read for the SoC ids it is signed for, and the copy
+signed for this machine's chip is the one installed. The chip id comes from
+`/sys/devices/soc0/soc_id`. That file is Linux's socinfo id, which is not the
+id in the signature (555 is the X Elite and means signing id `0xa009`; the
+X1P42100's signature id is `0xa016`, taken from a `qcom,x1p42100` compatible
+when socinfo does not say so itself). A `_pa` filename is a fallback, and
+only when the signatures cannot be compared and the chip is known. If
+nothing matches, the file is skipped and the message names every candidate
+and the chip ids. The tool does not guess.
+
+What the signatures do not decide, an installed companion still can: if
+linux-firmware has an image from the same device-tree node, the sibling
+image's hash selects the compatible variant. When no file of the node is
+installed yet, as on a first install after Windows updated a driver and kept
+the older package, every file of the node comes from the one driver package
+whose INF `DriverVer` Windows ranks first (date, then version). The result is
 installed under `/usr/lib/firmware/updates/<name>`. The GPU zap shader is
 added to the initramfs through `/etc/mkinitcpio.conf.d/qcom-firmware.conf`;
 the DSP images are loaded from the root filesystem. What was installed, from
