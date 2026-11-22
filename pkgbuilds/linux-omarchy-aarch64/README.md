@@ -450,6 +450,10 @@ The ThinkCentre's first USB controller has no Type-C port, so the connector, the
 
 The package installs `x126100-lenovo-thinkcentre-neo-50q-qc.json` with nine hardware IDs, the ones systemd-stub compares that hold across BIOS updates.
 
+### Vivobook S 15 (X1P-42-100) video firmware
+
+`2824` points the X1P-42-100 Vivobook S 15's iris node at `qcvss8380_pa.mbn`. The tree in 7.3 asks for `qcvss8380.mbn`, and ASUS signs that file only for the X Elite (SoC hw id 0xa009). On the X1P42100 (0xa016) TrustZone rejects it, so the video decoder never probes. `qcvss8380_pa.mbn` from the same Windows package is the production one-pipe image, signed for 0xa016, which is the name the other X1P42100 boards use. `asus-vivobook-s15-firmware` installs it under that name. The X Elite S 15 keeps `qcvss8380.mbn`.
+
 ### Surface Pro 11 with the LCD
 
 The Surface Pro 11 has one SMBIOS identity for its LCD and OLED models, and systemd's list gives it to `microsoft,denali-oled`, so an LCD model got the OLED tree. `x1p64100-microsoft-denali.json` carries the three hardware IDs that include the panel, LG's `LGD077b` from an owner's hardware report, under `microsoft,denali-lcd`. systemd-stub compares those before the others.
